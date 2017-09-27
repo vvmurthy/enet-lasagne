@@ -3,6 +3,7 @@
 
 # Ignore compiled models
 /enet
+/.idea
 
 # Ignore pyc
 *pyc

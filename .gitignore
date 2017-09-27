@@ -1,0 +1,9 @@
+# Ignore dataset
+/CamVid
+
+# Ignore compiled models
+/enet
+
+# Ignore pyc
+*pyc
+

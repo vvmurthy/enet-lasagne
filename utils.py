@@ -14,7 +14,8 @@ def iterate_minibatches(inputs, targets, small_targets, batchsize, shuffle=False
             excerpt = indices[start_idx:start_idx + batchsize]
         else:
             excerpt = slice(start_idx, start_idx + batchsize)
-        yield inputs[excerpt], targets[excerpt], small_targets[excerpt]
+        yield inputs[excerpt], targets[excerpt], small_targets[excerpt], class_weights(targets[excerpt]), \
+              class_weights(small_targets[excerpt])
 
 
 def iterate_membatches(inputs, targets, batchsize, dataset_loader, shuffle=False):
@@ -28,6 +29,17 @@ def iterate_membatches(inputs, targets, batchsize, dataset_loader, shuffle=False
         else:
             excerpt = slice(start_idx, start_idx + batchsize)
         yield dataset_loader(inputs[excerpt], targets[excerpt], inputs[excerpt].shape[0])
+
+
+def class_weights(y):
+    total_pos = np.count_nonzero(y)
+    c = 1.02
+    class_wgts = np.zeros((y.shape[0], y.shape[1], y.shape[2], y.shape[3])).astype(np.float32)
+
+    for n in range(0, y.shape[1]):
+        class_wgts[:, n, :, :] = 1 / np.log(c + np.count_nonzero(y[:, n, :, :]).astype(np.float32) / total_pos)[0]
+
+    return class_wgts
 
 
 def deprocess_image(image):
@@ -131,7 +143,7 @@ def show_examples(images, segmentations, num_examples, epoch, filename, seg_to_s
     else:
         plt.imshow(image)
 
-    fig.savefig(filename, bbox_inches='tight')
+    fig.savefig(filename, bbox_inches='tight', dpi=600)
     plt.close('all')
     
 

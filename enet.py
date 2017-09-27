@@ -3,7 +3,6 @@ import theano
 import theano.tensor as T
 import lasagne
 import numpy as np
-import pdb
 import time
 from utils import *
 
@@ -16,7 +15,7 @@ class Enet:
         self.lr = self.start_lr
         self.num_epochs = kwargs.get('num_epochs', 80)
         self.num_epochs_ed = kwargs.get('num_epochs_ed', 120)
-        self.bz = kwargs.get('bz', 8)
+        self.bz = kwargs.get('bz', 5)
         self.num_examples = kwargs.get('num_examples', 5)
         self.seed = kwargs.get('seed', 115)
 
@@ -463,6 +462,7 @@ class Enet:
         print("Building model and compiling functions...")
         small_targets = T.tensor4()
         targets = T.tensor4()
+        weights = T.tensor4()
 
 
         # Builds discriminator and generator
@@ -478,11 +478,15 @@ class Enet:
         ed_val_out = lasagne.layers.get_output(decoder['out'], inputs, deterministic=True)
 
         # Create loss expressions
-        train_e_loss = lasagne.objectives.binary_crossentropy(e_train_out, small_targets).mean()
-        train_ed_loss = lasagne.objectives.binary_crossentropy(ed_train_out, targets).mean()
+        train_e_loss = lasagne.objectives.binary_crossentropy(e_train_out, small_targets) * weights
+        train_e_loss = train_e_loss.mean()
+        train_ed_loss = lasagne.objectives.binary_crossentropy(ed_train_out, targets) * weights
+        train_ed_loss = train_ed_loss.mean()
 
-        val_e_loss = lasagne.objectives.binary_crossentropy(e_val_out, small_targets).mean()
-        val_ed_loss = lasagne.objectives.binary_crossentropy(ed_val_out, targets).mean()
+        val_e_loss = lasagne.objectives.binary_crossentropy(e_val_out, small_targets) * weights
+        val_e_loss = val_e_loss.mean()
+        val_ed_loss = lasagne.objectives.binary_crossentropy(ed_val_out, targets) * weights
+        val_ed_loss = val_ed_loss.mean()
 
         # Updates the paramters
         encoder_params = lasagne.layers.get_all_params(encoder['classifier'], trainable=True)
@@ -493,11 +497,11 @@ class Enet:
         ed_updates = lasagne.updates.adam(train_ed_loss, ed_params, learning_rate=lr, beta1=0.5)
 
         # Compiles functions
-        e_train_fn = theano.function([inputs, small_targets, lr], [train_e_loss], updates=encoder_updates)
-        ed_train_fn = theano.function([inputs, targets, lr], [train_ed_loss], updates=ed_updates)
+        e_train_fn = theano.function([inputs, small_targets, weights, lr], [train_e_loss], updates=encoder_updates)
+        ed_train_fn = theano.function([inputs, targets, weights, lr], [train_ed_loss], updates=ed_updates)
 
-        e_val_fn = theano.function([inputs, small_targets], [val_e_loss, e_val_out])
-        ed_val_fn = theano.function([inputs, targets], [val_ed_loss, ed_val_out])
+        e_val_fn = theano.function([inputs, small_targets, weights], [val_e_loss, e_val_out])
+        ed_val_fn = theano.function([inputs, targets, weights], [val_ed_loss, ed_val_out])
 
         print("...Done")
         return encoder, decoder, e_train_fn, ed_train_fn, e_val_fn, ed_val_fn
@@ -531,7 +535,7 @@ class Enet:
         print("Starting ENET Encoder Training...")
         for epoch in range(start_epoch, self.num_epochs):
                                     
-            if(epoch % 10 == 0 and epoch > 30):
+            if epoch % 10 == 0 and epoch > 30:
                 self.lr = self.lr / float(2)            
             
             start_time = time.time()
@@ -546,14 +550,13 @@ class Enet:
                                                                self.dataset.load_files,
                                                                shuffle=True):
 
-                for inputs, targets, small_targets in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
+                for inputs, targets, small_targets, _, wgts_small in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
                                                                           self.bz, shuffle=True):
 
                     # Train the encoder by itself
-                    err_epoch = e_train_fn(inputs, small_targets, self.lr)[0]
+                    err_epoch = e_train_fn(inputs, small_targets, wgts_small, self.lr)[0]
                     err[epoch] += err_epoch
                     num_batches += 1
-
 
             # Display training stats
             print("Epoch {} of {} took {:.3f} minutes".format(epoch + 1, self.num_epochs,
@@ -566,7 +569,6 @@ class Enet:
             np.save(self.base + 'stats/err_e.npy', err)
             np.savez(self.base + 'models/encoder_e' + str(epoch) + '.npz',
                      *lasagne.layers.get_all_param_values(encoder['classifier']))
-                     
 
             # Do a pass on validation data
             val_err_epoch = 0
@@ -582,9 +584,9 @@ class Enet:
                                                                self.dataset.load_files,
                                                                shuffle=False):
 
-                for inputs, targets, small_targets in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
+                for inputs, targets, small_targets, _, wgts_small in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
                                                                           self.bz, shuffle=True):
-                    ve, val_ims = e_val_fn(inputs, small_targets)
+                    ve, val_ims = e_val_fn(inputs, small_targets, wgts_small)
                     val_err_epoch += ve
                     
                     val_targets[im_count : im_count + small_targets.shape[0], :, :, : ] = small_targets
@@ -650,11 +652,11 @@ class Enet:
                                                                self.dataset.load_files,
                                                                shuffle=True):
 
-                for inputs, targets, small_targets in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
+                for inputs, targets, _, wgts_targets, _ in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
                                                                           self.bz, shuffle=True):
 
                     # Train the encoder by itself
-                    err_epoch = ed_train_fn(inputs, targets, self.lr)[0]
+                    err_epoch = ed_train_fn(inputs, targets, wgts_targets, self.lr)[0]
                     num_batches += 1
                     err[epoch]+= err_epoch
 
@@ -687,10 +689,10 @@ class Enet:
                                                                self.dataset.load_files,
                                                                shuffle=False):
 
-                for inputs, targets, small_targets in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
+                for inputs, targets, small_targets, wgts_targets, _ in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
                                                                           self.bz, shuffle=True):
 
-                    ed_err, val_ims = ed_val_fn(inputs, targets)
+                    ed_err, val_ims = ed_val_fn(inputs, targets, wgts_targets)
                     val_err_epoch += ed_err
                     val_images[im_count : im_count + targets.shape[0], :, :, :] = inputs
                     val_segs[im_count: im_count + targets.shape[0], :, :, :] = val_ims
@@ -710,7 +712,6 @@ class Enet:
         show_training_stats_graph(err, val_err,
                                   self.num_epochs, self.base + 'stats/stats_graph.png',
                                   'Validation error')
-       
 
         print("...Finished Enet Encoder-Decoder Training")
 

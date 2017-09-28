@@ -14,7 +14,7 @@ class Enet:
         self.start_lr = kwargs.get('lr', 5e-4)
         self.lr = self.start_lr
         self.num_epochs = kwargs.get('num_epochs', 80)
-        self.num_epochs_ed = kwargs.get('num_epochs_ed', 120)
+        self.num_epochs_ed = kwargs.get('num_epochs_ed', 200)
         self.bz = kwargs.get('bz', 5)
         self.num_examples = kwargs.get('num_examples', 5)
         self.seed = kwargs.get('seed', 115)
@@ -641,6 +641,9 @@ class Enet:
 
         for epoch in range(start_epoch, self.num_epochs_ed):
             
+            if epoch >= 120 and (epoch-20) % 100 == 0:
+                self.lr = self.lr / np.float32(10)
+            
             start_time = time.time()
             num_batches = 0
             err_epoch = 0
@@ -662,7 +665,7 @@ class Enet:
 
             # Display training stats
             err[epoch] = err[epoch] / float(num_batches)
-            print("Epoch {} of {} took {:.3f} minutes".format(epoch + 1, self.num_epochs,
+            print("Epoch {} of {} took {:.3f} minutes".format(epoch + 1, self.num_epochs_ed,
                                                               (time.time() - start_time) / np.float32(60)))
             print("  Error:\t\t{}".format(err[epoch]))
 

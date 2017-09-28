@@ -30,7 +30,7 @@ class CamVid:
         # Swap to n_channels x image_size x image_size
         im = np.swapaxes(np.swapaxes(im, 1, 2), 0, 1)
 
-        return im
+        return im / np.float32(255)
 
     def preprocess_annot(self, filename, h, w):
 

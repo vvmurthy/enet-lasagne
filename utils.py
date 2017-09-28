@@ -36,8 +36,8 @@ def class_weights(y):
     c = 1.02
     class_wgts = np.zeros((y.shape[0], y.shape[1], y.shape[2], y.shape[3])).astype(np.float32)
 
-    for n in range(0, y.shape[1]):
-        class_wgts[:, n, :, :] = 1 / np.log(c + np.count_nonzero(y[:, n, :, :]).astype(np.float32) / total_pos)[0]
+    for n in range(1, y.shape[1]):
+        class_wgts[:, n, :, :] = 1 / np.log(c + np.count_nonzero(y[:, n, :, :]) / float(total_pos)).astype(np.float32)
 
     return class_wgts
 
@@ -55,11 +55,11 @@ def deprocess_image(image):
 # Image to segmentation comparison
 # Debug
 def deprocess_segmentation(segmentation):
-    colors = [(64, 128, 64), (192, 0, 128), 	
-              (0, 128, 192), (0, 128, 64),	
-              (128, 0, 0), 	(64, 0, 128),	
-              (64, 0, 192), (192, 128, 64),
-              (192, 192, 128), (0, 64, 128),	
+    colors = [(0, 0, 0), (128, 128, 128), 	
+              (128, 0, 0), (192, 192, 128),	
+              (256, 69, 0), (128, 64, 128),	
+              (60, 40, 222), (128, 128, 0),
+              (192, 128, 128), (64, 64, 0),	
               (128, 0, 192), (192, 0, 64)]
     seg = np.argmax(segmentation, axis=0)
     color_seg = np.zeros((segmentation.shape[1], segmentation.shape[2],
@@ -143,7 +143,7 @@ def show_examples(images, segmentations, num_examples, epoch, filename, seg_to_s
     else:
         plt.imshow(image)
 
-    fig.savefig(filename, bbox_inches='tight', dpi=600)
+    fig.savefig(filename, bbox_inches='tight', dpi=450)
     plt.close('all')
     
 

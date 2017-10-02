@@ -36,18 +36,20 @@ def class_weights(y):
     c = 1.02
     class_wgts = np.zeros((y.shape[0], y.shape[1], y.shape[2], y.shape[3])).astype(np.float32)
 
-    for n in range(1, y.shape[1]):
+    for n in range(0, y.shape[1]):
         class_wgts[:, n, :, :] = 1 / np.log(c + np.count_nonzero(y[:, n, :, :]) / float(total_pos)).astype(np.float32)
 
     return class_wgts
 
 
-def deprocess_image(image):
-    image = image / np.float32(255)
-    im = np.zeros((image.shape[1], image.shape[2], image.shape[0])).astype(np.float32)
+def deprocess_image(image, scale=False):  
+    im = np.zeros((360, 480, image.shape[0])).astype(np.float32)
     for chan in range(0, image.shape[0]):
         im[:, :, chan] = image[chan, :, :]
-    return im
+        
+    if scale:
+        im = misc.imresize(im, (45, 60, 3), interp='nearest')
+    return im 
 
 
 # Segmentation to segmentation comparison
@@ -55,20 +57,21 @@ def deprocess_image(image):
 # Image to segmentation comparison
 # Debug
 def deprocess_segmentation(segmentation):
-    colors = [(0, 0, 0), (128, 128, 128), 	
+    
+    colors = [(128, 128, 128), 	
               (128, 0, 0), (192, 192, 128),	
               (256, 69, 0), (128, 64, 128),	
               (60, 40, 222), (128, 128, 0),
-              (192, 128, 128), (64, 64, 0),	
-              (128, 0, 192), (192, 0, 64)]
+              (192, 128, 128), (64, 64, 128),	
+              (64, 0, 128), (64, 64, 0), (0, 128, 192)]
     seg = np.argmax(segmentation, axis=0)
     color_seg = np.zeros((segmentation.shape[1], segmentation.shape[2],
-                          3)).astype(np.uint8)
+                          3)).astype(np.float32)
     for row in range(0, color_seg.shape[0]):
         for col in range(0, color_seg.shape[1]):
             color_seg[row, col, :] = colors[seg[row, col]]
     
-    return color_seg
+    return color_seg / 255
 
 
 def intersection_over_union(preds, gt):
@@ -81,7 +84,7 @@ def intersection_over_union(preds, gt):
         fp = np.count_nonzero(pds==cls) - tp
         fn = np.count_nonzero(gt[:, cls, :, :]) - tp
         IU += float(tp) / (tp + fp + fn)
-    return float(IU) / preds.shape[1]
+    return float(IU) / (preds.shape[1])
         
 
 # Shows graph of training statistics
@@ -110,22 +113,29 @@ def show_training_stats_graph(err, val_err, num_epochs, filename,
     plt.close(fig)
 
 
-def show_examples(images, segmentations, num_examples, epoch, filename, seg_to_seg=False):
+def show_examples(images, segmentations, targets, num_examples, epoch, filename):
 
     nc = 3
-    h = images.shape[2]
-    w = images.shape[3]
+    h = segmentations.shape[2]
+    w = segmentations.shape[3]
+    
+    if h == 45:
+        scale=True
+    else:
+        scale=False
 
-    image = np.zeros((h * num_examples, 2 * w, nc)).astype(np.float32)
+    image = np.zeros((h * num_examples, 3 * w, nc)).astype(np.float32)
 
     example_count = 0
     for example in range(0, num_examples):
-        if seg_to_seg:
-            select_im = deprocess_segmentation(images[example_count, :, :, :])
-        else:
-            select_im = deprocess_image(images[example_count, :, :, :])
-        image[h * example : h* example + h, 0 : w, :] = select_im
-        image[h * example : h * example + h , w : 2 * w, :] = deprocess_segmentation(segmentations[example_count, :, :, :])
+
+        image[h * example : h* example + h, 0 : w, :] = deprocess_image(images[example_count, :, :, :], scale)
+        
+        select_im = deprocess_segmentation(segmentations[example_count, :, :, :])
+        
+        image[h * example : h * example + h , w : 2 * w, :] = deprocess_segmentation(targets[example_count, :, :, :])
+        image[h * example : h * example + h ,2 * w : 3 * w, :] = select_im
+        
         example_count += 1
 
     fig, ax = plt.subplots()
@@ -138,10 +148,7 @@ def show_examples(images, segmentations, num_examples, epoch, filename, seg_to_s
     else:
         ax.set_title("Example Segmentations")
 
-    if nc == 1:
-        plt.imshow(np.squeeze(image), cmap='gray')
-    else:
-        plt.imshow(image)
+    plt.imshow(image)
 
     fig.savefig(filename, bbox_inches='tight', dpi=450)
     plt.close('all')

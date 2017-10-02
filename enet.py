@@ -14,7 +14,7 @@ class Enet:
         self.start_lr = kwargs.get('lr', 5e-4)
         self.lr = self.start_lr
         self.num_epochs = kwargs.get('num_epochs', 80)
-        self.num_epochs_ed = kwargs.get('num_epochs_ed', 200)
+        self.num_epochs_ed = kwargs.get('num_epochs_ed', 250)
         self.bz = kwargs.get('bz', 5)
         self.num_examples = kwargs.get('num_examples', 5)
         self.seed = kwargs.get('seed', 115)
@@ -570,40 +570,43 @@ class Enet:
             np.savez(self.base + 'models/encoder_e' + str(epoch) + '.npz',
                      *lasagne.layers.get_all_param_values(encoder['classifier']))
 
-            # Do a pass on validation data
-            val_err_epoch = 0
-            val_targets = np.zeros((self.X_files_val.shape[0], small_targets.shape[1],
-                                    small_targets.shape[2], small_targets.shape[3])).astype(np.float32)
-            val_segs = np.zeros((self.X_files_val.shape[0], small_targets.shape[1],
-                                 small_targets.shape[2], small_targets.shape[3])).astype(np.float32)
-            im_count = 0
-            num_batches = 0
-            for X_files_mem, y_files_mem, y_small_mem in iterate_membatches(self.X_files_val,
-                                                               self.y_files_val,
-                                                               self.images_in_mem,
-                                                               self.dataset.load_files,
-                                                               shuffle=False):
-
-                for inputs, targets, small_targets, _, wgts_small in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
-                                                                          self.bz, shuffle=True):
-                    ve, val_ims = e_val_fn(inputs, small_targets, wgts_small)
-                    val_err_epoch += ve
-                    
-                    val_targets[im_count : im_count + small_targets.shape[0], :, :, : ] = small_targets
-                    val_segs[im_count: im_count + small_targets.shape[0], :, :, :] = val_ims
-                    im_count += small_targets.shape[0]
-                    
-                    num_batches += 1
-                    
-            show_examples(val_targets, val_segs, self.num_examples, epoch, self.base + 'images/e_epoch' + str(epoch) + '.png',
-                          seg_to_seg=True)
-            val_err[epoch] = val_err_epoch / float(num_batches)
-            print("  Validation Error:\t\t{}".format(val_err[epoch]))
-            np.save(self.base + 'stats/val_err_e.npy', val_err)
-        # Make graph with training statistics
-        show_training_stats_graph(err, val_err,
-                                  self.num_epochs, self.base + 'stats/stats_graph.png',
-                                  'Validation error')
+            # Do a pass on validation data every 3 epochs
+            if (epoch + 1) % 5 == 0:
+                val_err_epoch = 0
+                val_targets = np.zeros((self.X_files_val.shape[0], small_targets.shape[1],
+                                        small_targets.shape[2], small_targets.shape[3])).astype(np.float32)
+                val_segs = np.zeros((self.X_files_val.shape[0], small_targets.shape[1],
+                                     small_targets.shape[2], small_targets.shape[3])).astype(np.float32)
+                val_images = np.zeros((self.X_files_val.shape[0], 3,
+                                     targets.shape[2], targets.shape[3])).astype(np.float32)
+                im_count = 0
+                num_batches = 0
+                for X_files_mem, y_files_mem, y_small_mem in iterate_membatches(self.X_files_val,
+                                                                   self.y_files_val,
+                                                                   self.images_in_mem,
+                                                                   self.dataset.load_files,
+                                                                   shuffle=False):
+    
+                    for inputs, targets, small_targets, _, wgts_small in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
+                                                                              self.bz, shuffle=True):
+                        ve, val_ims = e_val_fn(inputs, small_targets, wgts_small)
+                        val_err_epoch += ve
+                        
+                        val_images[im_count : im_count + small_targets.shape[0], :, :, :] = inputs
+                        val_targets[im_count : im_count + small_targets.shape[0], :, :, : ] = small_targets
+                        val_segs[im_count: im_count + small_targets.shape[0], :, :, :] = val_ims
+                        im_count += small_targets.shape[0]
+                        
+                        num_batches += 1
+                        
+                show_examples(val_images, val_segs, val_targets, self.num_examples, 
+                              epoch, self.base + 'images/e_epoch' + str(epoch) + '.png')
+                val_err[epoch] = val_err_epoch / float(num_batches)
+                print("  Validation Error:\t\t{}".format(val_err[epoch]))
+                IU = intersection_over_union(val_segs, val_targets)
+                print("  Validation Mean IU:\t\t{}".format(IU))
+                np.save(self.base + 'stats/val_err_e.npy', val_err)
+            
         print("...Finished Enet Encoder Training")
 
         print("Starting ENET Encoder-Decoder Training...")
@@ -641,8 +644,8 @@ class Enet:
 
         for epoch in range(start_epoch, self.num_epochs_ed):
             
-            if epoch >= 120 and (epoch-20) % 100 == 0:
-                self.lr = self.lr / np.float32(10)
+            if epoch >= 120 and (epoch-20) % 50 == 0:
+                self.lr = np.float32(self.lr / np.float32(10))
             
             start_time = time.time()
             num_batches = 0
@@ -678,43 +681,40 @@ class Enet:
                      *lasagne.layers.get_all_param_values(decoder['out']))
 
             # Do a pass on validation data
-            val_err_epoch = 0
-            val_images = np.zeros((self.X_files_val.shape[0], 3,
-                                    targets.shape[2], targets.shape[3])).astype(np.float32)
-            val_segs = np.zeros((self.X_files_val.shape[0], targets.shape[1],
-                                 targets.shape[2], targets.shape[3])).astype(np.float32)
-            val_targets = np.zeros((self.X_files_val.shape[0], targets.shape[1],
-                                 targets.shape[2], targets.shape[3])).astype(np.float32)
-            im_count = 0
-            for X_files_mem, y_files_mem, y_small_mem in iterate_membatches(self.X_files_val,
-                                                               self.y_files_val,
-                                                               self.images_in_mem,
-                                                               self.dataset.load_files,
-                                                               shuffle=False):
-
-                for inputs, targets, small_targets, wgts_targets, _ in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
-                                                                          self.bz, shuffle=True):
-
-                    ed_err, val_ims = ed_val_fn(inputs, targets, wgts_targets)
-                    val_err_epoch += ed_err
-                    val_images[im_count : im_count + targets.shape[0], :, :, :] = inputs
-                    val_segs[im_count: im_count + targets.shape[0], :, :, :] = val_ims
-                    val_targets[im_count: im_count + targets.shape[0], :, :, :] = targets
-
-                    im_count += small_targets.shape[0]
-                    num_batches += 1
-
-            show_examples(val_images, val_segs, self.num_examples, epoch,
-                          self.base + 'images/ed_epoch' + str(epoch) + '.png')
-            np.save(self.base + 'stats/val_err_ed.npy', val_err)
-            val_err[epoch] = val_err_epoch / float(num_batches)
-            print("  Validation Error:\t\t{}".format(val_err[epoch]))
-            IU = intersection_over_union(val_segs, val_targets)
-            print("  Validation Mean IU:\t\t{}".format(IU))
-        # Make graph with training statistics
-        show_training_stats_graph(err, val_err,
-                                  self.num_epochs, self.base + 'stats/stats_graph.png',
-                                  'Validation error')
+            if(epoch + 1) % 5 == 0:
+                val_err_epoch = 0
+                val_images = np.zeros((self.X_files_val.shape[0], 3,
+                                        targets.shape[2], targets.shape[3])).astype(np.float32)
+                val_segs = np.zeros((self.X_files_val.shape[0], targets.shape[1],
+                                     targets.shape[2], targets.shape[3])).astype(np.float32)
+                val_targets = np.zeros((self.X_files_val.shape[0], targets.shape[1],
+                                     targets.shape[2], targets.shape[3])).astype(np.float32)
+                im_count = 0
+                for X_files_mem, y_files_mem, y_small_mem in iterate_membatches(self.X_files_val,
+                                                                   self.y_files_val,
+                                                                   self.images_in_mem,
+                                                                   self.dataset.load_files,
+                                                                   shuffle=False):
+    
+                    for inputs, targets, small_targets, wgts_targets, _ in iterate_minibatches(X_files_mem, y_files_mem, y_small_mem,
+                                                                              self.bz, shuffle=True):
+    
+                        ed_err, val_ims = ed_val_fn(inputs, targets, wgts_targets)
+                        val_err_epoch += ed_err
+                        val_images[im_count : im_count + targets.shape[0], :, :, :] = inputs
+                        val_segs[im_count: im_count + targets.shape[0], :, :, :] = val_ims
+                        val_targets[im_count: im_count + targets.shape[0], :, :, :] = targets
+    
+                        im_count += small_targets.shape[0]
+                        num_batches += 1
+    
+                show_examples(val_images, val_segs, val_targets, self.num_examples, 
+                              epoch, self.base + 'images/ed_epoch' + str(epoch) + '.png')
+                np.save(self.base + 'stats/val_err_ed.npy', val_err)
+                val_err[epoch] = val_err_epoch / float(num_batches)
+                print("  Validation Error:\t\t{}".format(val_err[epoch]))
+                IU = intersection_over_union(val_segs, val_targets)
+                print("  Validation Mean IU:\t\t{}".format(IU))
 
         print("...Finished Enet Encoder-Decoder Training")
 

@@ -38,8 +38,7 @@ class CamVid:
         annot = misc.imread(filename)
 
         if h != 360 and w != 480:
-            for n in range(0, self.lab_ln):
-                annot = misc.imresize(annot, (h, w), interp='nearest')
+            annot = misc.imresize(annot, (h, w), interp='nearest')
 
         annot.astype(np.float32)
 

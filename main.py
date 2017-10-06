@@ -6,4 +6,7 @@ camvid = CamVid()
 net = Enet(camvid)
 
 # Start net training
-net.train()
+# net.train()
+
+# Test network
+net.test()

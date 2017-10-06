@@ -23,6 +23,9 @@ class CamVid:
         self.X_files_test, \
         self.y_files_test = self.init_dataset()
 
+        self.video_dir = '/CamVid_demo/'
+        self.X_files_video = self.video_frames()
+
     def preprocess_im(self, filename):
         im = misc.imread(filename)
         im.astype(np.float32)
@@ -37,7 +40,7 @@ class CamVid:
         # Load annotation
         annot = misc.imread(filename)
 
-        if h != 360 and w != 480:
+        if h != self.h and w != self.w:
             annot = misc.imresize(annot, (h, w), interp='nearest')
 
         annot.astype(np.float32)
@@ -48,6 +51,16 @@ class CamVid:
             annot_im[n, (annot == n)] = 1
 
         return annot_im
+
+    def load_video_files(self, X_files, num_samples):
+        X = np.zeros((num_samples, self.nc, 360, 480)).astype(np.float32)
+        if num_samples == 1:
+            return np.expand_dims(self.preprocess_im(X_files), axis=0)
+        else:
+            for im in range(0, num_samples):
+                X[im, :, :, :] = self.preprocess_im(X_files[im])
+
+        return X
 
     # Loads files after minibatch iteration
     def load_files(self, X_files, y_files, num_samples):
@@ -64,6 +77,16 @@ class CamVid:
                 y[im, :, :, :] = self.preprocess_annot(y_files[im], 360, 480)
                 y_small[im, :, :, :] = self.preprocess_annot(y_files[im], 45, 60)
         return X, y, y_small
+
+    def video_frames(self):
+        base = self.dir
+        files = os.listdir(base + self.video_dir)
+        X_files_vid = []
+        for fl in files:
+            # Load image
+            X_files_vid.append(base + self.video_dir + '/' + fl)
+
+        return X_files_vid
 
     def init_dataset(self):
 

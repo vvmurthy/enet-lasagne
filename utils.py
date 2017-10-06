@@ -28,7 +28,16 @@ def iterate_membatches(inputs, targets, batchsize, dataset_loader, shuffle=False
             excerpt = indices[start_idx:start_idx + batchsize]
         else:
             excerpt = slice(start_idx, start_idx + batchsize)
+
         yield dataset_loader(inputs[excerpt], targets[excerpt], inputs[excerpt].shape[0])
+
+
+def iterate_videobatches(inputs, batchsize, dataset_loader):
+
+    for start_idx in range(0, len(inputs) - batchsize + 1, batchsize):
+        excerpt = slice(start_idx, start_idx + batchsize)
+
+        yield dataset_loader(inputs[excerpt])
 
 
 def class_weights(y):
@@ -111,6 +120,20 @@ def show_training_stats_graph(err, val_err, num_epochs, filename,
 
     fig.savefig(filename)
     plt.close(fig)
+
+
+def tint_images(images, segmentations):
+    num_examples = segmentations.shape[0]
+
+    tinted_im = np.zeros((images.shape[0], images.shape[2], images.shape[3], images.shape[1]))
+
+    for example in range(0, num_examples):
+        im = deprocess_image(images[example, :, :, :], False)
+
+        select_im = deprocess_segmentation(segmentations[example, :, :, :])
+        tinted_im[example, :, :, :] = im * select_im
+
+    return tinted_im
 
 
 def show_examples(images, segmentations, targets, num_examples, epoch, filename):

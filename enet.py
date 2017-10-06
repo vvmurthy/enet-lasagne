@@ -5,6 +5,7 @@ import lasagne
 import numpy as np
 import time
 from utils import *
+import imageio
 
 
 class Enet:
@@ -26,10 +27,15 @@ class Enet:
         self.X_files_val = dataset.X_files_val
         self.y_files_val = dataset.y_files_val
         self.X_files_test = dataset.X_files_test
+        self.y_files_test = dataset.y_files_test
         self.h = dataset.h
         self.w = dataset.w
         self.nc = dataset.nc
         self.images_in_mem = dataset.images_in_mem
+
+        # for video functionality
+        self.video_loader = dataset.load_video_files
+        self.X_files_video = dataset.X_files_video
 
         self.base = os.getcwd() + '/' + folder_name + '/'
         if not os.path.isdir(self.base):
@@ -37,6 +43,7 @@ class Enet:
             os.mkdir(self.base + 'models/')
             os.mkdir(self.base + 'images/')
             os.mkdir(self.base + 'stats/')
+            os.mkdir(self.base + 'video/')
 
     def bottleneck(self, encoder, prev_name, name, num_filters, out_num_filters, filter_size, use_relu, asymetric,
                    dilated, downsample, drop_amt):
@@ -502,14 +509,15 @@ class Enet:
 
         e_val_fn = theano.function([inputs, small_targets, weights], [val_e_loss, e_val_out])
         ed_val_fn = theano.function([inputs, targets, weights], [val_ed_loss, ed_val_out])
+        ed_test_fn = theano.function([inputs], [ed_val_out])
 
         print("...Done")
-        return encoder, decoder, e_train_fn, ed_train_fn, e_val_fn, ed_val_fn
+        return encoder, decoder, e_train_fn, ed_train_fn, e_val_fn, ed_val_fn, ed_test_fn
 
     def train(self):
         # Make training functions
         print("Making Training Functions...")
-        encoder, decoder, e_train_fn, ed_train_fn, e_val_fn, ed_val_fn = self.build_train_fns()
+        encoder, decoder, e_train_fn, ed_train_fn, e_val_fn, ed_val_fn, _ = self.build_train_fns()
 
         # Load in params if training incomplete
         try:
@@ -723,3 +731,82 @@ class Enet:
         np.savez(self.base + 'models/decoder.npz', *lasagne.layers.get_all_param_values(decoder['out']))
 
         print("...ENET Training Complete")
+
+    def test(self):
+        encoder, decoder, _, _, e_val_fn, ed_val_fn, ed_test_fn = self.build_train_fns()
+
+        np.savez(self.base + 'models/encoder.npz', *lasagne.layers.get_all_param_values(encoder['classifier']))
+        np.savez(self.base + 'models/decoder.npz', *lasagne.layers.get_all_param_values(decoder['out']))
+
+        # Load models
+        with np.load(self.base + 'models/decoder.npz') as f:
+            param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+        lasagne.layers.set_all_param_values(decoder['out'], param_values)
+
+        with np.load(self.base + 'models/encoder.npz') as f:
+            param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+        lasagne.layers.set_all_param_values(encoder['classifier'], param_values)
+
+        # Do forward passes on test data and check result
+        val_err_epoch = 0
+        num_batches = 0
+        val_images = np.zeros((self.X_files_test.shape[0], 3,
+                               360, 480)).astype(np.float32)
+        val_segs = np.zeros((self.X_files_val.shape[0], 12, 360, 480)).astype(np.float32)
+        val_targets = np.zeros((self.X_files_val.shape[0], 12, 360, 480)).astype(np.float32)
+        im_count = 0
+        for X_files_mem, y_files_mem, y_small_mem in iterate_membatches(self.X_files_test,
+                                                                        self.y_files_test,
+                                                                        self.images_in_mem,
+                                                                        self.dataset.load_files,
+                                                                        shuffle=False):
+
+            for inputs, targets, small_targets, wgts_targets, _ in iterate_minibatches(X_files_mem, y_files_mem,
+                                                                                       y_small_mem,
+                                                                                       self.bz, shuffle=True):
+                ed_err, val_ims = ed_val_fn(inputs, targets, wgts_targets)
+                val_err_epoch += ed_err
+                val_images[im_count: im_count + targets.shape[0], :, :, :] = inputs
+                val_segs[im_count: im_count + targets.shape[0], :, :, :] = val_ims
+                val_targets[im_count: im_count + targets.shape[0], :, :, :] = targets
+
+                im_count += small_targets.shape[0]
+                num_batches += 1
+
+        show_examples(val_images, val_segs, val_targets, self.num_examples, None,
+                      self.base + 'images/test.png')
+        IU = intersection_over_union(val_segs, val_targets)
+        print("  Test Mean IU:\t\t{}".format(IU))
+
+        # Time a forward pass with one image
+        input_gpu = theano.shared(np.expand_dims(val_images[0], axis=0))
+        start_t = time.time()
+        output = ed_test_fn(input_gpu)
+        print(time.time() - start_t)
+
+        # Do forward passes on just images alone, stitch to video
+        val_images = np.zeros((self.X_files_test.shape[0], 3,
+                               360, 480)).astype(np.float32)
+        count = 0
+        for inputs in iterate_videobatches(self.X_files_video, 5, self.video_loader):
+            segs = ed_test_fn(inputs)
+            val_images[count : count + segs.shape[0], :, :, :] = tint_images(inputs, segs)
+            count += segs.shape[0]
+
+        for n in range(0, count):
+
+            fn = 'img' + str(n)
+            if len(fn) < 5:
+                fn = '00' + fn
+            elif len(fn) < 6:
+                fn = '0' + fn
+
+            fn += '.png'
+
+            misc.imsave(self.base + 'video/' + fn, val_images[n, :, :, :])
+
+
+
+
+
+
